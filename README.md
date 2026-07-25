@@ -4,6 +4,8 @@
 
 A lightweight, native macOS metronome that lives in your menu bar. Zero dependencies. Built with SwiftUI, `AVAudioEngine`, and sample-accurate scheduling.
 
+https://github.com/user-attachments/assets/82c246aa-a111-479f-8f64-9a2be480909c
+
 ## Features
 
 **Tempo & timing**
