@@ -49,7 +49,7 @@ struct SettingsView: View {
             Label("Volume", systemImage: "speaker.fill")
             Slider(value: volumeBinding, in: 0...1)
                 .controlSize(.small)
-            Text("\(Int(model.volume * 300))%")
+            Text("\(Int(model.volume * 100))%")
                 .font(.caption.monospacedDigit())
                 .frame(width: 36, alignment: .trailing)
         }

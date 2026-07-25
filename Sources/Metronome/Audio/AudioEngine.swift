@@ -144,7 +144,7 @@ final class AudioEngine: @unchecked Sendable {
     func updateVolume(_ vol: Double) {
         queue.sync {
             self.volume = vol
-            self.player.volume = Float(min(vol * 3.0, 1.0))
+            self.player.volume = Float(vol)
         }
     }
 
@@ -202,9 +202,9 @@ final class AudioEngine: @unchecked Sendable {
             }
         }
 
-        player.volume = Float(min(volume * 3.0, 1.0))
+        player.volume = Float(volume)
         player.play()
-        print("[AudioEngine] Player is playing (volume: \(min(volume * 3.0, 1.0)))")
+        print("[AudioEngine] Player is playing (volume: \(volume))")
 
         let currentSample = currentRenderSample()
         let sr = format.sampleRate
@@ -224,6 +224,8 @@ final class AudioEngine: @unchecked Sendable {
         guard isRunning else { return }
         stopTimers()
         player.stop()
+        lastKnownSampleTime = 0
+        nextSampleTime = 0
         isRunning = false
         print("[AudioEngine] Stopped")
     }
@@ -255,9 +257,9 @@ final class AudioEngine: @unchecked Sendable {
         try engine.start()
         print("[AudioEngine] Engine restarted after device change")
 
-        player.volume = Float(min(volume * 3.0, 1.0))
+        player.volume = Float(volume)
         player.play()
-        print("[AudioEngine] Player resumed after device change (volume: \(min(volume * 3.0, 1.0)))")
+        print("[AudioEngine] Player resumed after device change (volume: \(volume))")
 
         let currentSample = currentRenderSample()
         let sr = format.sampleRate
@@ -280,8 +282,9 @@ final class AudioEngine: @unchecked Sendable {
     }
 
     private func currentRenderSample() -> Int64 {
-        if let time = engine.mainMixerNode.lastRenderTime ?? player.lastRenderTime {
-            lastKnownSampleTime = time.sampleTime
+        if let nodeTime = engine.mainMixerNode.lastRenderTime,
+           let playerTime = player.playerTime(forNodeTime: nodeTime) {
+            lastKnownSampleTime = playerTime.sampleTime
             return lastKnownSampleTime
         }
         return lastKnownSampleTime

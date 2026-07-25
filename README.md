@@ -1,7 +1,5 @@
 # Menu Bar Metronome
 
-> **Current Issue:** Delayed sound / no sound on re-playing.
-
 A lightweight, native macOS metronome that lives in your menu bar. Zero dependencies. Built with SwiftUI, `AVAudioEngine`, and sample-accurate scheduling.
 
 https://github.com/user-attachments/assets/82c246aa-a111-479f-8f64-9a2be480909c
@@ -127,7 +125,7 @@ flowchart LR
     E --> D
 ```
 
-The engine doesn't poll `Timer` for audio. Instead it pre-schedules `AVAudioPCMBuffer` objects at precise `AVAudioTime(sampleTime:)` positions. A separate 60 Hz timer reads `playerNode.lastRenderTime` to determine which beat is currently playing and fires the UI callback.
+The engine doesn't poll `Timer` for audio. Instead it pre-schedules `AVAudioPCMBuffer` objects at precise `AVAudioTime(sampleTime:)` positions. A separate 60 Hz timer reads the mixer node's `lastRenderTime` converted to player time via `playerTime(forNodeTime:)` to determine which beat is currently playing and fires the UI callback.
 
 ## Sound synthesis
 
