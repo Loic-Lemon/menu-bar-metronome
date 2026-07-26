@@ -2,6 +2,8 @@
 
 A lightweight, native macOS metronome that lives in your menu bar. Zero dependencies. Built with SwiftUI, `AVAudioEngine`, and sample-accurate scheduling.
 
+🤖 Built with OpenCode using Kimi K3, GLM-5.2, DeepSeek V4 Pro & Flash.
+
 https://github.com/user-attachments/assets/82c246aa-a111-479f-8f64-9a2be480909c
 
 ## Features
@@ -195,13 +197,13 @@ No CocoaPods, no SPM packages, no Electron. The release binary is ~530 KB.
 
 ### FineTune volume mixer
 
-If you use [FineTune](https://fine.tune.app/) (a system-wide volume mixer for macOS),
+If you use [FineTune](https://github.com/ronitsingh10/FineTune) (a system-wide volume mixer for macOS),
 the metronome's short click bursts separated by silence can be misinterpreted by
 FineTune's dynamics processing — causing clicks to fade out, drop entirely, or sound
 inconsistent. This affects **all apps**, not just the metronome — `afplay` of the same
 click pattern through FineTune exhibits identical behavior.
 
-**Fix:** In FineTune, add the Metronome app to the bypass/exclusion list so its audio
+**Fix:** In FineTune, add the Metronome app to the bypass/exclusion/ignore list so its audio
 bypasses FineTune's processing entirely. Alternatively, disable compression, limiting,
 and noise-gating on the metronome's channel.
 
@@ -212,5 +214,3 @@ check whether any system-wide audio processing is running.
 ## License
 
 MIT
-
-🤖 Built with OpenCode using Kimi K3, GLM-5.2, DeepSeek V4 Pro & Flash.
