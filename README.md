@@ -191,6 +191,26 @@ Unsandboxed status is required for reliable Carbon `RegisterEventHotKey` support
 
 No CocoaPods, no SPM packages, no Electron. The release binary is ~530 KB.
 
+## Known issues
+
+### FineTune volume mixer
+
+If you use [FineTune](https://fine.tune.app/) (a system-wide volume mixer for macOS),
+the metronome's short click bursts separated by silence can be misinterpreted by
+FineTune's dynamics processing — causing clicks to fade out, drop entirely, or sound
+inconsistent. This affects **all apps**, not just the metronome — `afplay` of the same
+click pattern through FineTune exhibits identical behavior.
+
+**Fix:** In FineTune, add the Metronome app to the bypass/exclusion list so its audio
+bypasses FineTune's processing entirely. Alternatively, disable compression, limiting,
+and noise-gating on the metronome's channel.
+
+Other third-party audio processors (Elgato Wave Link, eqMac, SoundSource, Boom,
+Microsoft Teams' audio driver) can produce similar behavior. If clicks fade unexpectedly,
+check whether any system-wide audio processing is running.
+
 ## License
 
 MIT
+
+🤖 Built with OpenCode using Kimi K3, GLM-5.2, DeepSeek V4 Pro & Flash.

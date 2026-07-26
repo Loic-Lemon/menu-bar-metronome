@@ -8,6 +8,29 @@ enum ClickSynthesizer {
         subdivision: AVAudioPCMBuffer
     )
 
+    private struct SeededRNG {
+        private var state: UInt64
+        init(seed: UInt64) { state = seed != 0 ? seed : 1 }
+        mutating func next() -> Float {
+            state = state &* 6364136223846793005 &+ 1442695040888963407
+            let bits = UInt32(truncatingIfNeeded: state >> 33)
+            return Float(bits) / Float(UInt32.max) * 2.0 - 1.0
+        }
+    }
+
+    private static func noiseSeed(soundSet: SoundSet, isAccent: Bool) -> UInt64 {
+        var s: UInt64 = 0x4D6574726F6E6F6D
+        switch soundSet {
+        case .woodBlock:   s &+= 0x01
+        case .clave:       s &+= 0x02
+        case .digitalBeep: s &+= 0x03
+        case .rimShot:     s &+= 0x04
+        case .cowbell:     s &+= 0x05
+        }
+        if isAccent { s &+= 0x10 }
+        return s
+    }
+
     static func generateAllSoundSets(for format: AVAudioFormat) -> [SoundSet: BufferSet] {
         let sr = format.sampleRate
         var drafts: [SoundSet: BufferSet] = [:]
@@ -57,12 +80,13 @@ enum ClickSynthesizer {
         }
         buffer.frameLength = frameCount
 
+        var rng = SeededRNG(seed: Self.noiseSeed(soundSet: soundSet, isAccent: isAccent))
         let channelCount = Int(format.channelCount)
         for ch in 0..<channelCount {
             guard let ptr = buffer.floatChannelData?[ch] else { continue }
             for i in 0..<Int(frameCount) {
                 let t = Double(i) / sampleRate
-                ptr[i] = Float(sample(soundSet: soundSet, isAccent: isAccent, t: t, duration: duration))
+                ptr[i] = Float(sample(soundSet: soundSet, isAccent: isAccent, t: t, duration: duration, rng: &rng))
             }
         }
         return buffer
@@ -82,7 +106,8 @@ enum ClickSynthesizer {
         soundSet: SoundSet,
         isAccent: Bool,
         t: Double,
-        duration: Double
+        duration: Double,
+        rng: inout SeededRNG
     ) -> Float {
         let fd = Float(t)
         let envT = Float(t) / Float(duration)
@@ -108,17 +133,17 @@ enum ClickSynthesizer {
             let freq: Float = isAccent ? 1500 : 1000
             let env = exp(-envT * 18)
             let sq: Float = sin(2 * .pi * freq * fd) > 0 ? 1.0 : -1.0
-            let noise = Float.random(in: -0.05...0.05)
+            let noise = rng.next() * 0.05
             return (sq + noise) * env * 0.4
 
         case .rimShot:
             let env = exp(-envT * 30)
             if isAccent {
-                let noise = Float.random(in: -1...1)
+                let noise = rng.next()
                 let highTone = sin(2 * .pi * 4000 * fd)
                 return noise * highTone * env * 0.5
             } else {
-                return Float.random(in: -1...1) * env * 0.5
+                return rng.next() * env * 0.5
             }
 
         case .cowbell:

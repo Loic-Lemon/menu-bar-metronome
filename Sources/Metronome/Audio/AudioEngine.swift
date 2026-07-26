@@ -26,9 +26,9 @@ final class AudioEngine: @unchecked Sendable {
     private var nextSampleTime: Int64 = 0
     private var beatInBar: Int = 0
     private var subIndex: Int = 0
-    private let lookAheadSeconds: Double = 0.15
-    private let preScheduleSeconds: Double = 0.6
-    private let refillInterval: TimeInterval = 0.3
+    private let lookAheadSeconds: Double = 0.30
+    private let preScheduleSeconds: Double = 1.0
+    private let refillInterval: TimeInterval = 0.2
     private let flashInterval: TimeInterval = 1.0 / 60.0
 
     private var onBeat: (@Sendable (Int) -> Void)?
@@ -36,6 +36,7 @@ final class AudioEngine: @unchecked Sendable {
     private var lastKnownSampleTime: Int64 = 0
     private var lastFiredRange: Range<Int64>?
     private var configObserver: NSObjectProtocol?
+    private var clockAnchored = false
 
     init() {
         engine.attach(player)
@@ -61,11 +62,19 @@ final class AudioEngine: @unchecked Sendable {
     private func handleConfigurationChange() {
         queue.async {
             guard self.isRunning else { return }
-            print("[AudioEngine] Configuration change — re-preparing engine")
+            let newFormat = self.engine.outputNode.outputFormat(forBus: 0)
+            guard newFormat.sampleRate > 0, newFormat != self.currentFormat else {
+                if newFormat.sampleRate <= 0 {
+                    print("[AudioEngine] Configuration change — no output format, ignoring")
+                } else {
+                    print("[AudioEngine] Configuration change — format unchanged, ignoring")
+                }
+                return
+            }
+            print("[AudioEngine] Configuration change — format changed, re-preparing engine")
             self.player.stop()
             self.engine.stop()
             guard let format = self.currentFormat else { return }
-            let newFormat = self.engine.outputNode.outputFormat(forBus: 0)
             let effectiveFormat = newFormat.sampleRate > 0 ? newFormat : format
             self.currentFormat = effectiveFormat
             self.engine.connect(self.player, to: self.engine.mainMixerNode, format: effectiveFormat)
@@ -74,8 +83,13 @@ final class AudioEngine: @unchecked Sendable {
             do {
                 try self.engine.start()
                 self.lastFiredRange = nil
+                self.lastKnownSampleTime = 0
+                self.nextSampleTime = 0
+                self.player.volume = Float(self.volume)
                 self.player.play()
-                self._reschedule()
+                self.clockAnchored = false
+                self.scheduledRanges = []
+                print("[AudioEngine] Engine restarted after config change, waiting for clock anchor")
             } catch {
                 print("[AudioEngine] Failed to restart after configuration change: \(error)")
                 self.isRunning = false
@@ -174,6 +188,25 @@ final class AudioEngine: @unchecked Sendable {
 
     // MARK: - Private (call on queue)
 
+    private func ensureClockAnchor() -> Bool {
+        if clockAnchored { return true }
+        guard let format = currentFormat,
+              let nodeTime = engine.mainMixerNode.lastRenderTime,
+              let pt = player.playerTime(forNodeTime: nodeTime),
+              pt.sampleTime >= 0,
+              pt.sampleTime < Int64(format.sampleRate)
+        else { return false }
+        clockAnchored = true
+        lastKnownSampleTime = pt.sampleTime
+        nextSampleTime = pt.sampleTime + Int64(lookAheadSeconds * format.sampleRate)
+        beatInBar = 0
+        subIndex = 0
+        lastFiredRange = nil
+        scheduledRanges = []
+        print("[AudioEngine] Clock anchored at \(pt.sampleTime)")
+        return true
+    }
+
     private func _start() throws {
         guard !isRunning else { return }
 
@@ -196,6 +229,8 @@ final class AudioEngine: @unchecked Sendable {
             let liveFormat = engine.outputNode.outputFormat(forBus: 0)
             if liveFormat.sampleRate > 0 && liveFormat != existingFormat {
                 currentFormat = liveFormat
+                engine.connect(player, to: engine.mainMixerNode, format: liveFormat)
+                generateBuffersIfNeeded(format: liveFormat)
                 format = liveFormat
             } else {
                 format = existingFormat
@@ -206,15 +241,15 @@ final class AudioEngine: @unchecked Sendable {
         player.play()
         print("[AudioEngine] Player is playing (volume: \(volume))")
 
-        let currentSample = currentRenderSample()
-        let sr = format.sampleRate
-        nextSampleTime = currentSample + Int64(lookAheadSeconds * sr)
-        print("[AudioEngine] First sample at \(nextSampleTime) (current render sample: \(currentSample))")
-        beatInBar = 0
-        subIndex = 0
+#if DEBUG
+        TapRecorder.shared.arm(on: player)
+#endif
+
+        clockAnchored = false
         lastFiredRange = nil
         scheduledRanges = []
-        scheduleAhead()
+        lastKnownSampleTime = 0
+        nextSampleTime = 0
         startTimers()
 
         isRunning = true
@@ -224,25 +259,29 @@ final class AudioEngine: @unchecked Sendable {
         guard isRunning else { return }
         stopTimers()
         player.stop()
+        scheduledRanges = []
+        lastFiredRange = nil
         lastKnownSampleTime = 0
         nextSampleTime = 0
+        clockAnchored = false
         isRunning = false
         print("[AudioEngine] Stopped")
     }
 
     private func _reschedule() {
-        guard isRunning, let format = currentFormat else { return }
-        let currentSample = currentRenderSample()
-        let sr = format.sampleRate
-        nextSampleTime = currentSample + Int64(lookAheadSeconds * sr)
-        beatInBar = 0
-        subIndex = 0
+        guard isRunning, currentFormat != nil else { return }
+        player.stop()
+        player.play()
+        clockAnchored = false
         lastFiredRange = nil
         scheduledRanges = []
-        scheduleAhead()
+        lastKnownSampleTime = 0
+        nextSampleTime = 0
+        print("[AudioEngine] Rescheduled, waiting for clock anchor")
     }
 
     private func _resumeAfterDeviceChange() throws {
+        guard !isRunning else { return }
         // Engine was stopped by setOutputDevice; restart with new device
         let format = engine.outputNode.outputFormat(forBus: 0)
         guard format.sampleRate > 0 else { throw AudioError.noOutputDevice }
@@ -261,15 +300,12 @@ final class AudioEngine: @unchecked Sendable {
         player.play()
         print("[AudioEngine] Player resumed after device change (volume: \(volume))")
 
-        let currentSample = currentRenderSample()
-        let sr = format.sampleRate
-        nextSampleTime = currentSample + Int64(lookAheadSeconds * sr)
-        print("[AudioEngine] Resumed, first sample at \(nextSampleTime) (current render sample: \(currentSample))")
         lastFiredRange = nil
-        beatInBar = 0
-        subIndex = 0
+        lastKnownSampleTime = 0
+        nextSampleTime = 0
         scheduledRanges = []
-        scheduleAhead()
+        clockAnchored = false
+        stopTimers()
         startTimers()
         isRunning = true
     }
@@ -282,9 +318,10 @@ final class AudioEngine: @unchecked Sendable {
     }
 
     private func currentRenderSample() -> Int64 {
-        if let nodeTime = engine.mainMixerNode.lastRenderTime,
-           let playerTime = player.playerTime(forNodeTime: nodeTime) {
-            lastKnownSampleTime = playerTime.sampleTime
+        if clockAnchored,
+           let nodeTime = engine.mainMixerNode.lastRenderTime,
+           let pt = player.playerTime(forNodeTime: nodeTime) {
+            lastKnownSampleTime = pt.sampleTime
             return lastKnownSampleTime
         }
         return lastKnownSampleTime
@@ -297,8 +334,17 @@ final class AudioEngine: @unchecked Sendable {
         guard samplesPerSub > 0 else { return }
 
         let currentSample = currentRenderSample()
+
+        let minLead = Int64(0.05 * sr)
+        if nextSampleTime < currentSample + minLead {
+            print("[AudioEngine] Clock skip (next=\(nextSampleTime) now=\(currentSample)) — resyncing")
+            nextSampleTime = currentSample + Int64(lookAheadSeconds * sr)
+            beatInBar = 0
+            subIndex = 0
+        }
+
         let horizon = currentSample + Int64(preScheduleSeconds * sr)
-        let buf = buffers[soundSet]!
+        guard let buf = buffers[soundSet] else { return }
 
         var scheduledCount = 0
         let maxScheduled = 500
@@ -308,10 +354,14 @@ final class AudioEngine: @unchecked Sendable {
             let isSub = subIndex != 0
             let buffer: AVAudioPCMBuffer = isDownbeat ? buf.accent : (isSub ? buf.subdivision : buf.normal)
 
-            guard buffer.format == engine.mainMixerNode.inputFormat(forBus: 0) else {
-                print("[AudioEngine] Format mismatch: buffer \(buffer.format) vs mixer input \(engine.mainMixerNode.inputFormat(forBus: 0)) — regenerating buffers")
-                let mixerFormat = engine.mainMixerNode.inputFormat(forBus: 0)
+            let mixerFormat = engine.mainMixerNode.inputFormat(forBus: 0)
+            if buffer.format != mixerFormat
+                && buffersFormat?.sampleRate != mixerFormat.sampleRate {
+                print("[AudioEngine] Sample-rate mismatch: buffer \(buffer.format.sampleRate) vs mixer input \(mixerFormat.sampleRate) — regenerating buffers")
                 generateBuffersIfNeeded(format: mixerFormat)
+                engine.connect(player, to: engine.mainMixerNode, format: mixerFormat)
+                currentFormat = mixerFormat
+                scheduleAhead()
                 return
             }
             let scheduleTime = AVAudioTime(sampleTime: nextSampleTime, atRate: sr)
@@ -334,14 +384,15 @@ final class AudioEngine: @unchecked Sendable {
             scheduledCount += 1
         }
 
-        
+
     }
 
     private func startTimers() {
         refillTimer = DispatchSource.makeTimerSource(queue: queue)
-        refillTimer?.schedule(deadline: .now() + refillInterval, repeating: refillInterval, leeway: .milliseconds(10))
+        refillTimer?.schedule(deadline: .now() + 0.05, repeating: refillInterval, leeway: .milliseconds(10))
         refillTimer?.setEventHandler { [weak self] in
-            self?.scheduleAhead()
+            guard let self, self.isRunning else { return }
+            if self.ensureClockAnchor() { self.scheduleAhead() }
         }
         refillTimer?.resume()
 
