@@ -7,7 +7,7 @@ cd "$PROJECT_ROOT"
 echo "🏗️ Building Metronome (release)..."
 swift build -c release
 
-BUNDLE_DIR="build/Metronome.app"
+BUNDLE_DIR="$HOME/Applications/Metronome.app"
 rm -rf "$BUNDLE_DIR"
 
 echo "📦 Assembling $BUNDLE_DIR..."
@@ -21,4 +21,4 @@ cp Resources/Info.plist "$BUNDLE_DIR/Contents/"
 codesign --force --sign - --options runtime "$BUNDLE_DIR" 2>/dev/null || true
 
 echo "✅ Built: $BUNDLE_DIR"
-echo "   Run: open \"$BUNDLE_DIR\""
+open "$BUNDLE_DIR"

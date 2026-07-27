@@ -42,12 +42,11 @@ https://github.com/user-attachments/assets/82c246aa-a111-479f-8f64-9a2be480909c
 # Build and run from source
 swift run
 
-# Or build a release .app bundle
+# Or build a release .app bundle (installs to ~/Applications/)
 scripts/bundle.sh
-open build/Metronome.app
 ```
 
-The `.app` bundle is self-contained — copy it to `/Applications` and run it.
+The `.app` bundle builds directly to `~/Applications/` — no manual copying needed. It will be findable in Spotlight and Raycast immediately.
 
 ## Usage
 
