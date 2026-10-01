@@ -62,26 +62,43 @@ struct ContentView: View {
                 .controlSize(.small)
 
             HStack(spacing: 12) {
-                button("-", action: { model.bpm = max(20, model.bpm - 1); model.didChangeBpm() })
+                button("-", action: { model.apply(.delta(-1)) })
                 Text("BPM")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                button("+", action: { model.bpm = min(300, model.bpm + 1); model.didChangeBpm() })
+                button("+", action: { model.apply(.delta(1)) })
+            }
+
+            HStack(spacing: 8) {
+                ForEach(tempoPresets, id: \.label) { op in
+                    button(op.label, width: 34, fontSize: 14, action: { model.apply(op) })
+                }
             }
         }
     }
 
+    private let tempoPresets: [TempoOp] = [
+        .factor(0.5), .delta(-10), .delta(-5), .delta(5), .delta(10), .factor(2),
+    ]
+
     // MARK: - Controls
 
     private var controlsRow: some View {
-        HStack(spacing: 16) {
-            Button(action: { model.togglePlay() }) {
-                Label(model.isPlaying ? "Stop" : "Play",
-                      systemImage: model.isPlaying ? "stop.fill" : "play.fill")
-                .frame(maxWidth: .infinity)
+        HStack(alignment: .top, spacing: 16) {
+            VStack(spacing: 4) {
+                Button(action: { model.togglePlay() }) {
+                    Label(model.isPlaying ? "Stop" : "Play",
+                          systemImage: model.isPlaying ? "stop.fill" : "play.fill")
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(model.isPlaying ? .red : .green)
+
+                Text(HotkeyManager.playShortcutLabel)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
             }
-            .buttonStyle(.borderedProminent)
-            .tint(model.isPlaying ? .red : .green)
+            .frame(maxWidth: .infinity)
 
             Button(action: { model.tap() }) {
                 Label("Tap", systemImage: "hand.tap")
@@ -150,35 +167,21 @@ struct ContentView: View {
 
     // MARK: - Helpers
 
-    private func button(_ label: String, action: @escaping () -> Void) -> some View {
+    private func button(_ label: String, width: CGFloat = 28, fontSize: CGFloat = 16, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(label)
-                .font(.system(size: 16, weight: .medium, design: .monospaced))
-                .frame(width: 28, height: 28)
+                .font(.system(size: fontSize, weight: .medium, design: .monospaced))
+                .frame(width: width, height: 28)
         }
         .buttonStyle(.bordered)
         .controlSize(.small)
     }
 
-    private var densityPadding: CGFloat {
-        model.popoverDensity == .compact ? 12 : 18
-    }
-
-    private var suggestivePaddding: CGFloat {
-        model.popoverDensity == .compact ? 16 : 24
-    }
-
-    private var dotSize: CGFloat {
-        model.popoverDensity == .compact ? 12 : 16
-    }
-
-    private var dotStroke: CGFloat {
-        model.popoverDensity == .compact ? 1.5 : 2
-    }
-
-    private var dotSpacing: CGFloat {
-        model.popoverDensity == .compact ? 4 : 8
-    }
+    private let densityPadding: CGFloat = 12
+    private let suggestivePaddding: CGFloat = 16
+    private let dotSize: CGFloat = 12
+    private let dotStroke: CGFloat = 1.5
+    private let dotSpacing: CGFloat = 4
 
     private var bpmBinding: Binding<Double> {
         Binding(

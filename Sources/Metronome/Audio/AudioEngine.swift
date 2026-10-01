@@ -31,7 +31,7 @@ final class AudioEngine: @unchecked Sendable {
     private let refillInterval: TimeInterval = 0.2
     private let flashInterval: TimeInterval = 1.0 / 60.0
 
-    private var onBeat: (@Sendable (Int) -> Void)?
+    private var onBeat: (@Sendable (Int, Bool) -> Void)?
     private var scheduledRanges: [ScheduledRange] = []
     private var lastKnownSampleTime: Int64 = 0
     private var lastFiredRange: Range<Int64>?
@@ -104,7 +104,7 @@ final class AudioEngine: @unchecked Sendable {
         soundSet: SoundSet,
         accentDownbeat: Bool,
         volume: Double,
-        onBeat: @escaping @Sendable (Int) -> Void
+        onBeat: @escaping @Sendable (Int, Bool) -> Void
     ) throws {
         self.bpm = bpm
         self.timeSignature = timeSignature
@@ -372,7 +372,7 @@ final class AudioEngine: @unchecked Sendable {
             scheduledRanges.append(ScheduledRange(
                 sampleRange: rangeStart..<rangeEnd,
                 beat: beatInBar,
-                isDownbeat: isDownbeat
+                isMainBeat: subIndex == 0
             ))
 
             subIndex += 1
@@ -420,7 +420,7 @@ final class AudioEngine: @unchecked Sendable {
             if range.sampleRange.contains(currentSample) {
                 if range.sampleRange != lastFiredRange {
                     lastFiredRange = range.sampleRange
-                    onBeat?(range.beat)
+                    onBeat?(range.beat, range.isMainBeat)
                 }
                 break
             }
@@ -428,8 +428,8 @@ final class AudioEngine: @unchecked Sendable {
     }
 }
 
-private struct ScheduledRange {
+struct ScheduledRange {
     let sampleRange: Range<Int64>
     let beat: Int
-    let isDownbeat: Bool
+    let isMainBeat: Bool
 }

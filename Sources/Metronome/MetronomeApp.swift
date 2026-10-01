@@ -17,12 +17,42 @@ struct MetronomeApp: App {
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
+    // ponytail: cache symbol images — they were re-allocated on the main thread on
+    // every beat flash, competing with the popover open/close animation.
+    private static let iconImages: [String: NSImage] = {
+        let symbolSize = NSImage.SymbolConfiguration(pointSize: 15, weight: .regular)
+        let normal = NSImage(systemSymbolName: "metronome", accessibilityDescription: "Metronome")!
+            .withSymbolConfiguration(symbolSize)!
+        let filled = NSImage(systemSymbolName: "metronome.fill", accessibilityDescription: "Metronome")!
+            .withSymbolConfiguration(symbolSize)!
+        return [
+            "metronome": normal,
+            "metronome.fill": filled,
+            "metronome.flipped": mirrored(normal),
+            "metronome.fill.flipped": mirrored(filled),
+        ]
+    }()
+
+    private static func mirrored(_ image: NSImage) -> NSImage {
+        let result = NSImage(size: image.size)
+        result.lockFocus()
+        let transform = NSAffineTransform()
+        transform.translateX(by: image.size.width, yBy: 0)
+        transform.scaleX(by: -1, yBy: 1)
+        transform.concat()
+        image.draw(in: NSRect(origin: .zero, size: image.size))
+        result.unlockFocus()
+        result.isTemplate = image.isTemplate
+        return result
+    }
+
     private var statusItem: NSStatusItem!
     private var popover: NSPopover!
     private var hostingController: NSHostingController<AnyView>!
     let model = MetronomeModel()
 
     private nonisolated(unsafe) var clickOutsideMonitor: Any?
+    private var lastCloseAt: TimeInterval = 0
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupStatusItem()
@@ -45,10 +75,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         button.imagePosition = .imageOnly
         button.imageScaling = .scaleProportionallyDown
 
-        button.image = NSImage(
-            systemSymbolName: model.menuBarIconName,
-            accessibilityDescription: "Metronome"
-        )
+        button.image = Self.iconImages[model.menuBarIconName]
 
         button.target = self
         button.action = #selector(handleStatusItemClick(_:))
@@ -61,21 +88,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
 
         popover = NSPopover()
         popover.behavior = .transient
+        // Instant open/close: the native fade dropped frames and the transient
+        // auto-close (mouse-down) + performClose (mouse-up) double-fire made it worse.
+        popover.animates = false
         popover.delegate = self
         popover.contentViewController = hostingController
         fitPopoverSize()
     }
 
     private func fitPopoverSize() {
-        let width = model.popoverDensity.width
+        let width: CGFloat = 280
         let fitting = hostingController.sizeThatFits(
             in: NSSize(width: width, height: .greatestFiniteMagnitude)
         )
         let newSize = NSSize(width: width, height: max(200, fitting.height))
-        let animates = popover.animates
-        popover.animates = false
         popover.contentSize = newSize
-        popover.animates = animates
     }
 
     private func setupClickOutsideMonitor() {
@@ -96,13 +123,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     }
 
     private func observeMenuBarIcon() {
-        withObservationTracking { _ = self.model.menuBarIconName } onChange: {
+        withObservationTracking {
+            _ = self.model.menuBarIconName
+            _ = self.model.menuBarPointerFlipped
+        } onChange: {
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                self.statusItem.button?.image = NSImage(
-                    systemSymbolName: self.model.menuBarIconName,
-                    accessibilityDescription: "Metronome"
-                )
+                guard let button = self.statusItem.button else { return }
+                let suffix = self.model.menuBarPointerFlipped ? ".flipped" : ""
+                button.image = Self.iconImages[self.model.menuBarIconName + suffix]
                 self.observeMenuBarIcon()
             }
         }
@@ -110,7 +139,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
 
     private func observePopoverLayout() {
         withObservationTracking {
-            _ = self.model.popoverDensity
             _ = self.model.showSettings
         } onChange: {
             Task { @MainActor [weak self] in
@@ -129,6 +157,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
 
     func popoverDidClose(_ notification: Notification) {
         model.popoverVisible = false
+        model.showSettings = false
+        lastCloseAt = ProcessInfo.processInfo.systemUptime
     }
 
     // MARK: - Actions
@@ -150,6 +180,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
                 model.popoverVisible = false
                 popover.performClose(sender)
             } else {
+                // ponytail: 250ms dead-zone — transient popovers can auto-close on this
+                // click's mouse-down; without it the mouse-up instantly reopens.
+                guard ProcessInfo.processInfo.systemUptime - lastCloseAt >= 0.25 else { return }
                 fitPopoverSize()
                 model.popoverVisible = true
                 popover.show(relativeTo: sender.bounds, of: sender, preferredEdge: .minY)

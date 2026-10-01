@@ -10,10 +10,13 @@ struct SettingsView: View {
         VStack(spacing: 12) {
             headerRow
             flashToggle
+            Toggle(isOn: screenBorderFlashBinding) {
+                Label("Screen border flash", systemImage: "rectangle.inset.filled")
+            }
+            .help("Soft edge glow on every beat, on all screens. Contains flashing light.")
             accentToggle
             volumeSlider
             outputDevicePicker
-            densityPicker
         }
         .padding(12)
         .background(.quaternary, in: RoundedRectangle(cornerRadius: 10))
@@ -69,24 +72,17 @@ struct SettingsView: View {
         }
     }
 
-    private var densityPicker: some View {
-        HStack {
-            Label("Popover size", systemImage: "arrow.up.left.and.arrow.down.right")
-            Spacer()
-            Picker("", selection: densityBinding) {
-                ForEach(PopoverDensity.allCases, id: \.self) { d in
-                    Text(d.label).tag(d)
-                }
-            }
-            .labelsHidden()
-            .pickerStyle(.segmented)
-        }
-    }
-
     private var flashBinding: Binding<Bool> {
         Binding(
             get: { model.visualFlashEnabled },
             set: { model.visualFlashEnabled = $0; model.didChangeVisualFlash() }
+        )
+    }
+
+    private var screenBorderFlashBinding: Binding<Bool> {
+        Binding(
+            get: { model.screenBorderFlashEnabled },
+            set: { model.screenBorderFlashEnabled = $0; model.didChangeScreenBorderFlash() }
         )
     }
 
@@ -114,10 +110,4 @@ struct SettingsView: View {
         )
     }
 
-    private var densityBinding: Binding<PopoverDensity> {
-        Binding(
-            get: { model.popoverDensity },
-            set: { model.popoverDensity = $0; model.didChangePopoverDensity() }
-        )
-    }
 }

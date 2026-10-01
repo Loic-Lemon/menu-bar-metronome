@@ -8,10 +8,10 @@ final class MetronomeModel {
     var timeSignature: TimeSignature = .fourFour
     var subdivision: Subdivision = .quarter
     var soundSet: SoundSet = .woodBlock
-    var popoverDensity: PopoverDensity = .compact
     var isPlaying = false
     var currentBeatIndex: Int = 0
     var visualFlashEnabled = true
+    var screenBorderFlashEnabled = false
     var accentDownbeat = true
     var volume: Double = 0.7
     var selectedOutputDeviceUID: String?
@@ -19,10 +19,11 @@ final class MetronomeModel {
     var popoverVisible = false
 
     private(set) var menuBarIconName = "metronome"
-    private(set) var isFlashingNow = false
+    private(set) var menuBarPointerFlipped = false
 
     let audio = AudioEngine()
     let hotkeys = HotkeyManager()
+    @ObservationIgnored private let screenBorderFlash = ScreenBorderFlash()
     private var flashTask: Task<Void, Never>?
     private var taps: [Date] = []
 
@@ -55,20 +56,19 @@ final class MetronomeModel {
                 soundSet: soundSet,
                 accentDownbeat: accentDownbeat,
                 volume: volume,
-                onBeat: { [weak self] beatIndex in
+                onBeat: { [weak self] beatIndex, isMainBeat in
                     let model = self
                     Task { @MainActor in
-                        guard let model else { return }
-                        if model.popoverVisible {
+                        guard let model, model.isPlaying else { return }
+                        if isMainBeat, model.screenBorderFlashEnabled {
+                            model.screenBorderFlash.pulse(bpm: model.bpm)
+                        }
+                        if model.popoverVisible, model.currentBeatIndex != beatIndex {
                             model.currentBeatIndex = beatIndex
                         }
+                        model.menuBarPointerFlipped.toggle()
                         if model.visualFlashEnabled {
                             model.triggerFlash()
-                        }
-                        if model.popoverVisible {
-                            model.isFlashingNow = true
-                            try? await Task.sleep(for: .milliseconds(80))
-                            model.isFlashingNow = false
                         }
                     }
                 }
@@ -83,9 +83,9 @@ final class MetronomeModel {
     func stop() {
         guard isPlaying else { return }
         audio.stop()
+        screenBorderFlash.stop()
         isPlaying = false
         currentBeatIndex = 0
-        isFlashingNow = false
         menuBarIconName = "metronome"
     }
 
@@ -106,6 +106,11 @@ final class MetronomeModel {
         let clamped = min(max(60.0 / average, 20.0), 300.0)
         bpm = round(clamped * 10) / 10
         if isPlaying { stop() }
+    }
+
+    func apply(_ op: TempoOp) {
+        bpm = op.apply(to: bpm)
+        didChangeBpm()
     }
 
     func didChangeBpm() {
@@ -158,17 +163,23 @@ final class MetronomeModel {
         savePreferences()
     }
 
-    func didChangePopoverDensity() {
+    func didChangeScreenBorderFlash() {
+        if !screenBorderFlashEnabled { screenBorderFlash.stop() }
         savePreferences()
     }
 
     private func triggerFlash() {
-        menuBarIconName = "metronome.fill"
+        // ponytail: guard writes on value change — @Observable notifies on every
+        // write even when the value is identical, and onBeat fires per subdivision.
+        if menuBarIconName != "metronome.fill" {
+            menuBarIconName = "metronome.fill"
+        }
         flashTask?.cancel()
         flashTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(80))
             guard !Task.isCancelled else { return }
-            self?.menuBarIconName = "metronome"
+            guard let self, self.menuBarIconName != "metronome" else { return }
+            self.menuBarIconName = "metronome"
         }
     }
 
@@ -184,9 +195,8 @@ final class MetronomeModel {
            let sd = Subdivision(rawValue: raw) { subdivision = sd }
         if let raw = defaults.string(forKey: "soundSet"),
            let ss = SoundSet(rawValue: raw) { soundSet = ss }
-        if let raw = defaults.string(forKey: "popoverDensity"),
-           let pd = PopoverDensity(rawValue: raw) { popoverDensity = pd }
         visualFlashEnabled = defaults.object(forKey: "visualFlashEnabled").flatMap { $0 as? Bool } ?? true
+        screenBorderFlashEnabled = defaults.bool(forKey: "screenBorderFlashEnabled")
         accentDownbeat = defaults.object(forKey: "accentDownbeat").flatMap { $0 as? Bool } ?? true
         volume = defaults.object(forKey: "volume").flatMap { $0 as? Double } ?? 0.7
         selectedOutputDeviceUID = defaults.string(forKey: "selectedOutputDeviceUID")
@@ -198,14 +208,36 @@ final class MetronomeModel {
         defaults.set(timeSignature.rawValue, forKey: "timeSignature")
         defaults.set(subdivision.rawValue, forKey: "subdivision")
         defaults.set(soundSet.rawValue, forKey: "soundSet")
-        defaults.set(popoverDensity.rawValue, forKey: "popoverDensity")
         defaults.set(visualFlashEnabled, forKey: "visualFlashEnabled")
+        defaults.set(screenBorderFlashEnabled, forKey: "screenBorderFlashEnabled")
         defaults.set(accentDownbeat, forKey: "accentDownbeat")
         defaults.set(volume, forKey: "volume")
         if let uid = selectedOutputDeviceUID {
             defaults.set(uid, forKey: "selectedOutputDeviceUID")
         } else {
             defaults.removeObject(forKey: "selectedOutputDeviceUID")
+        }
+    }
+}
+
+enum TempoOp: Sendable {
+    case delta(Int)
+    case factor(Double)
+
+    func apply(to bpm: Double, range: ClosedRange<Double> = 20...300) -> Double {
+        let raw: Double
+        switch self {
+        case .delta(let d): raw = bpm + Double(d)
+        case .factor(let f): raw = bpm * f
+        }
+        return min(max(raw.rounded(), range.lowerBound), range.upperBound)
+    }
+
+    var label: String {
+        switch self {
+        case .delta(let d): return d >= 0 ? "+\(d)" : "\(d)"
+        case .factor(let f):
+            return f < 1 ? "÷\(Int((1 / f).rounded()))" : "×\(Int(f.rounded()))"
         }
     }
 }

@@ -3,7 +3,7 @@ import Foundation
 
 enum SelfTest {
     static func run() -> Never {
-        let result = testScheduling()
+        let result = testTempoOps() && testScreenBorderFlashTiming() && testScheduling()
         if result {
             print("[SelfTest] PASS")
             exit(0)
@@ -11,6 +11,48 @@ enum SelfTest {
             print("[SelfTest] FAIL")
             exit(1)
         }
+    }
+
+    private static func testTempoOps() -> Bool {
+        let cases: [(TempoOp, Double, Double)] = [
+            (.delta(-5), 70, 65),
+            (.delta(10), 70, 80),
+            (.factor(0.5), 70, 35),
+            (.factor(2), 70, 140),
+            (.factor(0.5), 101, 51),   // rounds to nearest whole BPM
+            (.factor(2), 290, 300),    // clamps at upper bound
+            (.factor(0.5), 20, 20),    // clamps at lower bound (10 → 20)
+        ]
+        for (op, input, expected) in cases {
+            let got = op.apply(to: input)
+            guard got == expected else {
+                print("[SelfTest] TempoOp on \(input): expected \(expected), got \(got)")
+                return false
+            }
+        }
+        guard TempoOp.factor(0.5).label == "÷2",
+              TempoOp.delta(-10).label == "-10",
+              TempoOp.delta(5).label == "+5" else {
+            print("[SelfTest] TempoOp label mismatch")
+            return false
+        }
+        return true
+    }
+
+    private static func testScreenBorderFlashTiming() -> Bool {
+        for bpm in 20...300 {
+            let duration = ScreenBorderFlash.pulseDuration(bpm: Double(bpm))
+            guard duration > 0, duration <= 0.28, duration < 60 / Double(bpm) else {
+                print("[SelfTest] Border flash overlaps next beat at \(bpm) BPM")
+                return false
+            }
+        }
+        guard ScreenBorderFlash.pulseDuration(bpm: 120) == 0.28,
+              abs(ScreenBorderFlash.pulseDuration(bpm: 300) - 0.16) < 0.0001 else {
+            print("[SelfTest] Border flash timing mismatch")
+            return false
+        }
+        return true
     }
 
     private static func testScheduling() -> Bool {

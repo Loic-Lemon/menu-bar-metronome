@@ -1,6 +1,9 @@
 import Carbon
 
 final class HotkeyManager: @unchecked Sendable {
+    /// Display string for the play/pause hotkey; keep in sync with startKeyCode + modifiers.
+    static let playShortcutLabel = "⌃⌘S"
+
     var onTogglePlay: (() -> Void)?
     var onTapTempo: (() -> Void)?
 
@@ -10,16 +13,18 @@ final class HotkeyManager: @unchecked Sendable {
     private let startHotKeyID = EventHotKeyID(signature: 0x4D54524F, id: 1)
     private let tapHotKeyID = EventHotKeyID(signature: 0x4D54524F, id: 2)
 
-    private let startKeyCode: UInt32 = 46
-    private let tapKeyCode: UInt32 = 17
+    private let startKeyCode: UInt32 = 1    // kVK_ANSI_S
+    private let tapKeyCode: UInt32 = 17     // kVK_ANSI_T
 
     func register() {
         guard !isRegistered else { return }
         isRegistered = true
 
-        let modifiers = UInt32(cmdKey | optionKey | controlKey)
-        registerSingle(id: startHotKeyID, keyCode: startKeyCode, modifiers: modifiers, ref: &hotKeyRefs[1])
-        registerSingle(id: tapHotKeyID, keyCode: tapKeyCode, modifiers: modifiers, ref: &hotKeyRefs[2])
+        // Play: ⌃⌘S (no macOS system conflict). Tap: ⌃⌥⌘T.
+        registerSingle(id: startHotKeyID, keyCode: startKeyCode,
+                       modifiers: UInt32(cmdKey | controlKey), ref: &hotKeyRefs[1])
+        registerSingle(id: tapHotKeyID, keyCode: tapKeyCode,
+                       modifiers: UInt32(cmdKey | optionKey | controlKey), ref: &hotKeyRefs[2])
 
         installEventHandler()
     }
